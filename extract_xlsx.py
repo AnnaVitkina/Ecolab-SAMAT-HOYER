@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from ebs_format import is_ebs_format, normalize_ebs_df, parse_rate_value
+from hoyer_json_format import is_hoyer_json_path, load_hoyer_json, prepare_hoyer_json_df
 from project_paths import CODE_DIR, INPUT_DIR, PROCESSING_DIR
 
 REQUIRED_PREFIX_COLUMNS = [
@@ -30,26 +31,34 @@ FREIGHT_RATE_COLUMN = "Freight Rate"
 OPTIONAL_SHIPMENT_COLUMNS = ["Origin City", "Destination City"]
 
 
-def find_xlsx_files() -> list[Path]:
-    files = sorted(
-        path
-        for path in INPUT_DIR.glob("*.xlsx")
-        if not path.name.startswith("~$")
-    )
-    if not files:
-        files = sorted(
+def find_input_files() -> list[Path]:
+    patterns = ("*.xlsx", "*.json")
+    files: list[Path] = []
+    for pattern in patterns:
+        files.extend(
             path
-            for path in CODE_DIR.glob("*.xlsx")
+            for path in INPUT_DIR.glob(pattern)
             if not path.name.startswith("~$")
         )
-    return files
+    if not files:
+        for pattern in patterns:
+            files.extend(
+                path
+                for path in CODE_DIR.glob(pattern)
+                if not path.name.startswith("~$")
+            )
+    return sorted(files, key=lambda path: path.name.casefold())
+
+
+def find_xlsx_files() -> list[Path]:
+    return [path for path in find_input_files() if path.suffix.lower() == ".xlsx"]
 
 
 def prompt_for_file() -> Path:
-    files = find_xlsx_files()
+    files = find_input_files()
 
     if files:
-        print("\nAvailable XLSX files:")
+        print("\nAvailable input files:")
         for index, path in enumerate(files, start=1):
             print(f"  {index}. {path.name}")
         print("  0. Enter a custom file path")
@@ -63,14 +72,20 @@ def prompt_for_file() -> Path:
                 return files[int(choice) - 1]
             print("Invalid selection. Try again.")
     else:
-        print("No XLSX files found in input/. Enter a file path.")
+        print("No input files found in input/. Enter a file path.")
 
     while True:
-        custom_path = input("Enter path to XLSX file: ").strip().strip('"')
+        custom_path = input("Enter path to input file (.xlsx or .json): ").strip().strip('"')
         path = Path(custom_path).expanduser().resolve()
-        if path.is_file() and path.suffix.lower() == ".xlsx":
+        if path.is_file() and path.suffix.lower() in {".xlsx", ".json"}:
             return path
-        print("File not found or not an .xlsx file. Try again.")
+        print("File not found or not a supported input file (.xlsx / .json). Try again.")
+
+
+def load_source(path: Path) -> pd.DataFrame:
+    if is_hoyer_json_path(path):
+        return load_hoyer_json(path)
+    return load_xlsx(path)
 
 
 def load_xlsx(path: Path) -> pd.DataFrame:
@@ -123,7 +138,13 @@ def filter_rate_rows(df: pd.DataFrame) -> pd.DataFrame:
     return filtered.drop_duplicates(keep="first").reset_index(drop=True)
 
 
-def prepare_df(df: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
+def prepare_df(df: pd.DataFrame, *, source_path: Path | None = None) -> tuple[pd.DataFrame, bool, bool]:
+    is_hoyer_json = source_path is not None and is_hoyer_json_path(source_path)
+    if is_hoyer_json:
+        print("\nDetected HOYER JSON (Purate) layout.")
+        df = prepare_hoyer_json_df(df)
+        return df, False, True
+
     is_ebs = is_ebs_format(df)
     if is_ebs:
         print("\nDetected EBS ship-to layout.")
@@ -134,7 +155,7 @@ def prepare_df(df: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
     removed = before_count - len(df)
     if removed:
         print(f"      Removed {removed} row(s) with empty transport cost or duplicates.")
-    return df, is_ebs
+    return df, is_ebs, False
 
 
 def save_xlsx(df: pd.DataFrame, source_path: Path) -> Path:
