@@ -35,6 +35,7 @@ CARRIER_NAME_MAP = {
     "Samat Normandie": "SAMAT NORMANDIE EBS",
     "Samat Spain": "SAMAT ESPANA NSAP",
 }
+HOYER_JSON_CARRIER_NAME = "HOYER SVENSKA NSAP"
 DEFAULT_CURRENCY = "EUR"
 DEFAULT_APPLY_IF = "Applies if: invoiced by Carrier"
 
@@ -84,16 +85,37 @@ EBS_SHIPMENT_COLUMNS = [
     ShipmentColumn("Destination City", "Destination City"),
 ]
 
+HOYER_JSON_SHIPMENT_COLUMNS = [
+    ShipmentColumn("Lane #"),
+    ShipmentColumn("Carrier Name", "_hoyer_json_carrier"),
+    ShipmentColumn("Origin Country", "Origin Country"),
+    ShipmentColumn("Origin Postal Code", "Origin ZIP Code"),
+    ShipmentColumn("Origin City", "Origin City"),
+    ShipmentColumn("Destination Country", "Destination Country"),
+    ShipmentColumn("Destination postal code", "Destination ZIP Code"),
+    ShipmentColumn("Destination City", "Destination City"),
+    ShipmentColumn("Mode", "Mode"),
+]
+
 
 def get_shipment_columns(
     df: pd.DataFrame,
     *,
     is_ebs: bool = False,
+    is_hoyer_json: bool = False,
 ) -> list[ShipmentColumn]:
-    template = EBS_SHIPMENT_COLUMNS if is_ebs else SHIPMENT_COLUMNS
+    if is_hoyer_json:
+        template = HOYER_JSON_SHIPMENT_COLUMNS
+    elif is_ebs:
+        template = EBS_SHIPMENT_COLUMNS
+    else:
+        template = SHIPMENT_COLUMNS
     visible: list[ShipmentColumn] = []
     for column in template:
         if column.header == "Lane #":
+            visible.append(column)
+            continue
+        if column.source == "_hoyer_json_carrier":
             visible.append(column)
             continue
         if column.source == "_carrier_name":
@@ -122,13 +144,26 @@ EBS_COST_BLOCKS = [
     CostBlock("Transport cost", "Freight Rate"),
 ]
 
+HOYER_JSON_COST_BLOCKS = [
+    CostBlock("Transport cost", "Freight Rate"),
+    CostBlock("Infrastructure Fee", "Infrastructure Fee"),
+    CostBlock("MAUT (DE)", "MAUT (DE)"),
+    CostBlock("ETS", "ETS"),
+]
+
 
 def get_cost_blocks(
     df: pd.DataFrame,
     *,
     is_ebs: bool = False,
+    is_hoyer_json: bool = False,
 ) -> list[CostBlock]:
-    template = EBS_COST_BLOCKS if is_ebs else COST_BLOCKS
+    if is_hoyer_json:
+        template = HOYER_JSON_COST_BLOCKS
+    elif is_ebs:
+        template = EBS_COST_BLOCKS
+    else:
+        template = COST_BLOCKS
     return [block for block in template if block.source_column in df.columns]
 
 
@@ -235,6 +270,8 @@ def _format_cell_value(value: object) -> object:
 def _shipment_value(df: pd.DataFrame, row_idx: int, column: ShipmentColumn) -> object:
     if column.header == "Lane #":
         return row_idx + 1
+    if column.source == "_hoyer_json_carrier":
+        return HOYER_JSON_CARRIER_NAME
     if column.source == "_carrier_name":
         return map_carrier_name(df.at[row_idx, "Vendor Name"])
     if column.source == "Vendor Number":
@@ -286,12 +323,21 @@ def write_layout_sheet(
     df: pd.DataFrame,
     *,
     is_ebs: bool = False,
+    is_hoyer_json: bool = False,
 ) -> None:
     if df.empty:
         raise ValueError("Cannot build layout from an empty DataFrame.")
 
-    shipment_columns = get_shipment_columns(df, is_ebs=is_ebs)
-    cost_blocks = get_cost_blocks(df, is_ebs=is_ebs)
+    shipment_columns = get_shipment_columns(
+        df,
+        is_ebs=is_ebs,
+        is_hoyer_json=is_hoyer_json,
+    )
+    cost_blocks = get_cost_blocks(
+        df,
+        is_ebs=is_ebs,
+        is_hoyer_json=is_hoyer_json,
+    )
 
     if not cost_blocks:
         raise ValueError(
@@ -332,19 +378,28 @@ def build_layout_workbook(
     df: pd.DataFrame,
     *,
     is_ebs: bool = False,
+    is_hoyer_json: bool = False,
     split_by_vendor: bool = True,
 ) -> Workbook:
     if df.empty:
         raise ValueError("Cannot build layout from an empty DataFrame.")
 
-    vendor_groups = split_df_by_vendor(df, split_by_vendor=split_by_vendor)
+    if is_hoyer_json:
+        vendor_groups = [("rates", df.reset_index(drop=True))]
+    else:
+        vendor_groups = split_df_by_vendor(df, split_by_vendor=split_by_vendor)
     wb = Workbook()
     default_sheet = wb.active
     wb.remove(default_sheet)
 
     for sheet_name, vendor_df in vendor_groups:
         ws = wb.create_sheet(title=sheet_name)
-        write_layout_sheet(ws, vendor_df, is_ebs=is_ebs)
+        write_layout_sheet(
+            ws,
+            vendor_df,
+            is_ebs=is_ebs,
+            is_hoyer_json=is_hoyer_json,
+        )
 
     return wb
 
@@ -354,6 +409,7 @@ def save_layout_xlsx(
     source_path: Path,
     *,
     is_ebs: bool = False,
+    is_hoyer_json: bool = False,
     split_by_vendor: bool = True,
 ) -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -361,6 +417,7 @@ def save_layout_xlsx(
     wb = build_layout_workbook(
         df,
         is_ebs=is_ebs,
+        is_hoyer_json=is_hoyer_json,
         split_by_vendor=split_by_vendor,
     )
     wb.save(output_path)
