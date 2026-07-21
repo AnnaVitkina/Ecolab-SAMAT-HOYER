@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 from extract_xlsx import (
-    load_xlsx,
+    load_source,
     prepare_df,
     prompt_for_file,
     save_xlsx,
@@ -31,7 +31,11 @@ class PipelineResult:
     format_name: str
 
 
-def detect_format_name(df: pd.DataFrame) -> str:
+def detect_format_name(source_path: Path, df: pd.DataFrame) -> str:
+    from hoyer_json_format import is_hoyer_json_path
+
+    if is_hoyer_json_path(source_path):
+        return "HOYER JSON (Purate)"
     from ebs_format import is_ebs_format
 
     if is_ebs_format(df):
@@ -45,12 +49,12 @@ def run_pipeline(source_path: Path | None = None) -> PipelineResult:
         source_path = prompt_for_file()
 
     print(f"\n[1/4] Reading: {source_path}")
-    raw_df = load_xlsx(source_path)
-    format_name = detect_format_name(raw_df)
+    raw_df = load_source(source_path)
+    format_name = detect_format_name(source_path, raw_df)
     print(f"      Loaded {len(raw_df)} rows, {len(raw_df.columns)} columns ({format_name})")
 
     print("\n[2/4] Preparing data...")
-    df, is_ebs = prepare_df(raw_df)
+    df, is_ebs, is_hoyer_json = prepare_df(raw_df, source_path=source_path)
     print(f"      Cleaned to {len(df)} rows, {len(df.columns)} columns")
 
     print("\n[3/4] Saving extracted data to processing/...")
@@ -58,11 +62,12 @@ def run_pipeline(source_path: Path | None = None) -> PipelineResult:
     print(f"      {extracted_path}")
 
     print("\n[4/4] Building layout workbook in output/...")
-    split_by_vendor = prompt_split_by_vendor(df)
+    split_by_vendor = False if is_hoyer_json else prompt_split_by_vendor(df)
     layout_path = save_layout_xlsx(
         df,
         source_path,
         is_ebs=is_ebs,
+        is_hoyer_json=is_hoyer_json,
         split_by_vendor=split_by_vendor,
     )
     sheet_count = len(split_df_by_vendor(df, split_by_vendor=split_by_vendor))
