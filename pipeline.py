@@ -36,6 +36,10 @@ def detect_format_name(source_path: Path, df: pd.DataFrame) -> str:
 
     if is_hoyer_json_path(source_path):
         return "HOYER JSON (Purate)"
+    from hoyer_bulk_format import is_hoyer_bulk_format, is_hoyer_bulk_path
+
+    if is_hoyer_bulk_format(df) or is_hoyer_bulk_path(source_path):
+        return "HOYER bulk tender"
     from ebs_format import is_ebs_format
 
     if is_ebs_format(df):
