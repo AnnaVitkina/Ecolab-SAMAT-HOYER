@@ -40,6 +40,10 @@ def detect_format_name(source_path: Path, df: pd.DataFrame) -> str:
 
     if is_hoyer_bulk_format(df) or is_hoyer_bulk_path(source_path):
         return "HOYER bulk tender"
+    from tesjoki_format import is_tesjoki_format, is_tesjoki_path
+
+    if is_tesjoki_format(df) or is_tesjoki_path(source_path):
+        return "Tesjoki (Samat)"
     from ebs_format import is_ebs_format
 
     if is_ebs_format(df):
