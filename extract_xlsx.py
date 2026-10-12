@@ -8,6 +8,13 @@ from pathlib import Path
 import pandas as pd
 
 from ebs_format import is_ebs_format, normalize_ebs_df, parse_rate_value
+from hoyer_bulk_format import (
+    filter_hoyer_bulk_rate_rows,
+    is_hoyer_bulk_format,
+    is_hoyer_bulk_path,
+    load_hoyer_bulk,
+    normalize_hoyer_bulk_df,
+)
 from hoyer_json_format import is_hoyer_json_path, load_hoyer_json, prepare_hoyer_json_df
 from project_paths import CODE_DIR, INPUT_DIR, PROCESSING_DIR
 
@@ -29,6 +36,16 @@ EBS_PREFIX_COLUMNS = [
 ]
 FREIGHT_RATE_COLUMN = "Freight Rate"
 OPTIONAL_SHIPMENT_COLUMNS = ["Origin City", "Destination City"]
+
+# Accept common header aliases; values are renamed to the canonical internal names.
+COLUMN_ALIASES = {
+    "origin postal code": "Origin ZIP Code",
+    "origin zip code": "Origin ZIP Code",
+    "destination postal code": "Destination ZIP Code",
+    "destination zip code": "Destination ZIP Code",
+    "lane id": "Lane",
+    "lane #": "Lane",
+}
 
 
 def find_input_files() -> list[Path]:
@@ -85,6 +102,8 @@ def prompt_for_file() -> Path:
 def load_source(path: Path) -> pd.DataFrame:
     if is_hoyer_json_path(path):
         return load_hoyer_json(path)
+    if is_hoyer_bulk_path(path):
+        return load_hoyer_bulk(path)
     return load_xlsx(path)
 
 
@@ -98,6 +117,26 @@ def find_freight_rate_column(columns: pd.Index) -> str | None:
         if text == FREIGHT_RATE_COLUMN or text.startswith(f"{FREIGHT_RATE_COLUMN} "):
             return column
     return None
+
+
+def normalize_input_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Strip header whitespace and map Postal Code / other aliases to ZIP Code names."""
+    rename_map: dict[str, str] = {}
+    used_targets: set[str] = set()
+
+    for column in df.columns:
+        stripped = str(column).strip()
+        canonical = COLUMN_ALIASES.get(stripped.casefold(), stripped)
+        if canonical in used_targets:
+            # Keep the first mapping when both ZIP and Postal variants exist.
+            continue
+        if column != canonical:
+            rename_map[column] = canonical
+        used_targets.add(canonical)
+
+    if not rename_map:
+        return df
+    return df.rename(columns=rename_map)
 
 
 def normalize_freight_rate_column(df: pd.DataFrame) -> pd.DataFrame:
@@ -116,10 +155,15 @@ def normalize_freight_rate_column(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def clean_df(df: pd.DataFrame, *, is_ebs: bool = False) -> pd.DataFrame:
+    df = normalize_input_columns(df)
     prefix_columns = EBS_PREFIX_COLUMNS if is_ebs else REQUIRED_PREFIX_COLUMNS
     missing = [col for col in prefix_columns if col not in df.columns]
     if missing:
-        raise ValueError(f"Missing required columns: {', '.join(missing)}")
+        found = ", ".join(str(col) for col in df.columns)
+        raise ValueError(
+            f"Missing required columns: {', '.join(missing)}. "
+            f"Found columns: {found}"
+        )
 
     df = normalize_freight_rate_column(df)
 
@@ -145,6 +189,19 @@ def prepare_df(df: pd.DataFrame, *, source_path: Path | None = None) -> tuple[pd
         df = prepare_hoyer_json_df(df)
         return df, False, True
 
+    if is_hoyer_bulk_format(df) or (
+        source_path is not None and is_hoyer_bulk_path(source_path)
+    ):
+        print("\nDetected HOYER bulk tender layout.")
+        df = normalize_hoyer_bulk_df(df)
+        before_count = len(df)
+        df = filter_hoyer_bulk_rate_rows(df)
+        removed = before_count - len(df)
+        if removed:
+            print(f"      Removed {removed} row(s) with empty transport cost or duplicates.")
+        return df, False, False
+
+    df = normalize_input_columns(df)
     is_ebs = is_ebs_format(df)
     if is_ebs:
         print("\nDetected EBS ship-to layout.")
