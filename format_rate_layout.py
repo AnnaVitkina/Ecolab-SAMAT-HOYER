@@ -30,6 +30,8 @@ LEFT = Alignment(horizontal="left", vertical="center", wrap_text=True)
 CARRIER_NAME_MAP = {
     "Hoyer": "HOYER GMBH NSAP",
     "Hoyer GmbH": "HOYER GMBH NSAP",
+    "Hoyer España": "HOYER ESPANA S.A. NSAP",
+    "Hoyer Espana": "HOYER ESPANA S.A. NSAP",
     "Hoyer España SA": "HOYER ESPANA S.A. NSAP",
     "Samat Haanpa - Tesjoki": "SAMAT INTERNATIONAL NSAP",
     "Samat Normandie": "SAMAT NORMANDIE EBS",
@@ -151,6 +153,16 @@ HOYER_JSON_COST_BLOCKS = [
     CostBlock("ETS", "ETS"),
 ]
 
+HOYER_BULK_COST_BLOCKS = [
+    CostBlock("Transport cost (Intermodal)", "Transport cost (Intermodal)"),
+    CostBlock("Transport cost (Road)", "Transport cost (Road)"),
+    CostBlock("Infrastructure Fee", "Surcharge infraestructure Hoyer"),
+    CostBlock("ETS Fee", "ETS 2026 Hoyer"),
+    CostBlock("Toll Fee", "2026 Toll BE-NL"),
+    CostBlock("Cleaning costs (Intermodal)", "Cleaning costs (Intermodal)"),
+    CostBlock("Cleaning costs (Road)", "Cleaning costs (Road)"),
+]
+
 
 def get_cost_blocks(
     df: pd.DataFrame,
@@ -160,6 +172,8 @@ def get_cost_blocks(
 ) -> list[CostBlock]:
     if is_hoyer_json:
         template = HOYER_JSON_COST_BLOCKS
+    elif "Transport cost (Intermodal)" in df.columns or "Transport cost (Road)" in df.columns:
+        template = HOYER_BULK_COST_BLOCKS
     elif is_ebs:
         template = EBS_COST_BLOCKS
     else:
