@@ -17,6 +17,12 @@ from hoyer_bulk_format import (
 )
 from hoyer_json_format import is_hoyer_json_path, load_hoyer_json, prepare_hoyer_json_df
 from project_paths import CODE_DIR, INPUT_DIR, PROCESSING_DIR
+from tesjoki_format import (
+    is_tesjoki_format,
+    is_tesjoki_path,
+    load_tesjoki,
+    normalize_tesjoki_df,
+)
 
 REQUIRED_PREFIX_COLUMNS = [
     "Lane",
@@ -104,6 +110,8 @@ def load_source(path: Path) -> pd.DataFrame:
         return load_hoyer_json(path)
     if is_hoyer_bulk_path(path):
         return load_hoyer_bulk(path)
+    if is_tesjoki_path(path):
+        return load_tesjoki(path)
     return load_xlsx(path)
 
 
@@ -196,6 +204,18 @@ def prepare_df(df: pd.DataFrame, *, source_path: Path | None = None) -> tuple[pd
         df = normalize_hoyer_bulk_df(df)
         before_count = len(df)
         df = filter_hoyer_bulk_rate_rows(df)
+        removed = before_count - len(df)
+        if removed:
+            print(f"      Removed {removed} row(s) with empty transport cost or duplicates.")
+        return df, False, False
+
+    if is_tesjoki_format(df) or (
+        source_path is not None and is_tesjoki_path(source_path)
+    ):
+        print("\nDetected Tesjoki (Samat) route-rate layout.")
+        df = normalize_tesjoki_df(df)
+        before_count = len(df)
+        df = filter_rate_rows(df)
         removed = before_count - len(df)
         if removed:
             print(f"      Removed {removed} row(s) with empty transport cost or duplicates.")
